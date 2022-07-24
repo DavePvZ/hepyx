@@ -64,7 +64,7 @@ def main(sys_argv: list[str]) -> None:
     file_offset: int = 0
     file_size: int = get_size(file)
     size_len: int = len(hex(file_size)) - 2
-    current_encoding: str = "utf8"
+    curr_encoding: str = "ascii"
     while True:
         stdscr.attron(curses.A_REVERSE)
         stdscr.addstr(0, 0, " " * maxx)
@@ -111,9 +111,9 @@ def main(sys_argv: list[str]) -> None:
         file.seek(file_offset, 0)
         for line in range(1, maxy - maxy_minus):
             for block in range(16):
-                curr_byte: bytes = file.read(1)
+                curr_byte: str = file.read(1).decode(curr_encoding)
                 # i don't know how to check non-printable symbols
-                stdscr.addstr(line, sum((syms_start, block*(len(syms_sep)+1))), "")
+                stdscr.addstr(line, sum((syms_start, block*(len(syms_sep)+1))), curr_byte if curr_byte.isprintable() else ".")
 
         stdscr.refresh()
         stdscr.getch()
