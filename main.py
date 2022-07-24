@@ -27,6 +27,8 @@ spaces_hex: tuple = (0, 1, 0, 1, 0)
 # 5 pos - in other cases
 hex_sym_sep: str = " | "
 # separator between hex nums and symbols
+syms_sep: str = ""
+# separator between symbols
 # -----------------------------------------------------
 
 
@@ -62,6 +64,7 @@ def main(sys_argv: list[str]) -> None:
     file_offset: int = 0
     file_size: int = get_size(file)
     size_len: int = len(hex(file_size)) - 2
+    current_encoding: str = "utf8"
     while True:
         stdscr.attron(curses.A_REVERSE)
         stdscr.addstr(0, 0, " " * maxx)
@@ -109,6 +112,8 @@ def main(sys_argv: list[str]) -> None:
         for line in range(1, maxy - maxy_minus):
             for block in range(16):
                 curr_byte: bytes = file.read(1)
+                # i don't know how to check non-printable symbols
+                stdscr.addstr(line, sum((syms_start, block*(len(syms_sep)+1))), "")
 
         stdscr.refresh()
         stdscr.getch()
