@@ -59,9 +59,10 @@ def main(sys_argv: list[str]) -> None:
     # dumb python can't understand that {lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms)}
     # is not a generator, so hehe ''.join() go brrrrrrrrrrrr
     perms_str: str = f"[{''.join(lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms))}]"
-    # [horizontal, vertical]
+    # [vertical, horizontal]
     cursor: list[int, int] = [0, 0]
-    file_offset: int = 0
+    file_offset: int = 0  # must be file_offset % 16 == 0
+    # and yeah, this is also an up left corner
     file_size: int = get_size(file)
     size_len: int = len(hex(file_size)) - 2
     curr_encoding: str = "ascii"
@@ -86,6 +87,7 @@ def main(sys_argv: list[str]) -> None:
         hex_start: int = len(hex_start)  # later this will be hor cords
         # NO, THIS CAN'T BE REFERENCED BEFORE ASSIGNMENT
         # BECAUSE I ASSIGNED IN PREVIOUS LINE YOU DUMB PYCHARM
+        # (i fixed it)
 
         file.seek(file_offset, 0)
         spaces_between_hex: int = 0
@@ -111,9 +113,15 @@ def main(sys_argv: list[str]) -> None:
         file.seek(file_offset, 0)
         for line in range(1, maxy - maxy_minus):
             for block in range(16):
-                curr_byte: str = file.read(1).decode(curr_encoding)
-                # i don't know how to check non-printable symbols
-                stdscr.addstr(line, sum((syms_start, block*(len(syms_sep)+1))), curr_byte if curr_byte.isprintable() else ".")
+                curr_byte: str = file.read(1).decode(curr_encoding, "replace")
+                # i found out that it replaces these symbols with 65533
+                stdscr.addstr(line, sum((syms_start, block*(len(syms_sep)+1))),
+                              curr_byte if curr_byte.isprintable() else ".")
+
+        stdscr.attron(curses.A_REVERSE)
+        # why this don't workkkkkkkkkkkkkkkk
+        stdscr.addstr(maxy-1, 0, " " * (maxx-1))
+        stdscr.attroff(curses.A_REVERSE)
 
         stdscr.refresh()
         stdscr.getch()
