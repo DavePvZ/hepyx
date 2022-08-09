@@ -19,7 +19,7 @@ addr_hex_sep: str = "| "
 maxy_minus: int = 1
 # maxy_minus is number of rows, which must be minused
 # to make correct output
-spaces_hex: tuple = (0, 1, 0, 1, 0)
+spaces_hex: tuple = (1, 2, 1, 2, 1)
 # 1 pos - after 2nd and 14th hex num
 # 2 pos - after 4th and 12th hex num
 # 3 pos - after 6th and 10th hex num
@@ -56,34 +56,39 @@ def main(sys_argv: list[str]) -> None:
     # y - vertical
     # x - horizontal
     maxy, maxx = stdscr.getmaxyx()
+    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
     # dumb python can't understand that {lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms)}
     # is not a generator, so hehe ''.join() go brrrrrrrrrrrr
     perms_str: str = f"[{''.join(lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms))}]"
-    # [vertical, horizontal]
-    cursor: list[int, int] = [0, 0]
+    # [vertical, horizontal, field]
+    # field:
+    # 0 - hex field
+    # 1 - symbols field
+    cursor: list[int, int, int] = [0, 0, 0]
     file_offset: int = 0  # must be file_offset % 16 == 0
     # and yeah, this is also an up left corner
-    file_size: int = get_size(file)
+    file_size: int = os.path.getsize(fname)
     size_len: int = len(hex(file_size)) - 2
     curr_encoding: str = "ascii"
     while True:
-        stdscr.attron(curses.A_REVERSE)
+        # this finally works :)
+        stdscr.attron(curses.color_pair(1))
         stdscr.addstr(0, 0, " " * maxx)
-        stdscr.addstr(0, 0, f"  {perms_str}")
+        stdscr.addstr(maxy - maxy_minus, 0, " " * (maxx - 1))
+        stdscr.addstr(0, 2, perms_str)
         stdscr.addstr(0, int((maxx-len(fname)) / 2), f"[{fname}]")
-        stdscr.attroff(curses.A_REVERSE)
+        stdscr.attroff(curses.color_pair(1))
 
         # this must be optimized
         max_len: int = min_addr_num
-        hex_start: str = ""
+        hex_start: str = ''
         for offset in range(file_offset, file_offset+(16*(maxy-1)), 16):
             rjusted_offset: str = (hex(offset))[2:].rjust(size_len, '0')
             max_len: int = len(rjusted_offset) if len(rjusted_offset) > max_len else max_len
         for line, offset in zip(range(1, maxy - 1), range(file_offset, file_offset+(16*(maxy-1)), 16)):
             # help
             rjusted_offset: str = (hex(offset))[2:].rjust(max_len, '0')
-            stdscr.addstr(line, 0,
-                          hex_start := (rjusted_offset + f"{addr_hex_sep}"))
+            stdscr.addstr(line, 0, hex_start := (rjusted_offset + f"{addr_hex_sep}"))
         hex_start: int = len(hex_start)  # later this will be hor cords
         # NO, THIS CAN'T BE REFERENCED BEFORE ASSIGNMENT
         # BECAUSE I ASSIGNED IN PREVIOUS LINE YOU DUMB PYCHARM
@@ -102,8 +107,9 @@ def main(sys_argv: list[str]) -> None:
                         break
                 else:
                     spaces_between_hex: int = spaces_hex[4]
-                stdscr.addstr(line,  # .                               Idk how to remove this without breaking an output
-                              sum((hex_start, spaces_between_hex, (3*block), sum(int(block > i) for i in (4, 8, 12)))),
+                stdscr.addstr(line, sum((hex_start, spaces_between_hex, (3*block),
+                                         # Idk how to remove this without breaking an output
+                                         sum(int(block > i) for i in (4, 8, 12)))),
                               hexed_byte if len(curr_byte) else "..")
         syms_start: int = sum((hex_start, spaces_between_hex, 45, 3, 2))
 
@@ -118,24 +124,41 @@ def main(sys_argv: list[str]) -> None:
                 stdscr.addstr(line, sum((syms_start, block*(len(syms_sep)+1))),
                               curr_byte if curr_byte.isprintable() else ".")
 
-        stdscr.attron(curses.A_REVERSE)
-        # why this don't workkkkkkkkkkkkkkkk
-        stdscr.addstr(maxy-1, 0, " " * (maxx-1))
-        stdscr.attroff(curses.A_REVERSE)
+        hex_addr_symbol: str = hex(cursor[1])[2]
+        stdscr.addstr(1+cursor[0], hex_start - len(hex_sym_sep),
+                      hex_addr_symbol.upper() if caps_hex else hex_addr_symbol)
+        file.seek(file_offset + (cursor[0] * 16) + cursor[1], 0)
+        hexed_byte = file.read(1).hex()
+        stdscr.addstr(cursor[0]+1, sum((hex_start, cursor[1]*2, sum(int(cursor[1] > i) for i in (4, 8, 12)))),
+                      hexed_byte.upper() if caps_hex else hexed_byte, curses.color_pair(1))
 
         stdscr.refresh()
-        stdscr.getch()
-        break
+
+        user_input = stdscr.getch()
+        match user_input:
+            case curses.KEY_DOWN:
+                if cursor[0] < maxy - maxy_minus:
+                    cursor[0] += 1
+                else:
+                    file_offset += 16
+            case curses.KEY_UP:
+                if cursor[0] > 0:
+                    cursor[0] -= 1
+                else:
+                    if file_offset > 0:
+                        file_offset -= 16
+            case curses.KEY_RIGHT:
+                if cursor[1] < 15:
+                    cursor[1] += 1
+                else:
+                    if not cursor[2]:
+                        cursor[2] = 1
+            case curses.KEY_LEFT:
+                ...
+            case 113:  # ord('q')
+                break
     curses.endwin()
     file.close()
-
-
-def get_size(fileobject: typing.IO) -> int:
-    later = fileobject.tell()
-    fileobject.seek(0, 2)
-    actual_size = fileobject.tell()
-    fileobject.seek(later, 0)
-    return actual_size
 
 
 if __name__ == "__main__":
