@@ -24,7 +24,7 @@ spaces_hex: tuple = (1, 2, 1, 2, 1)
 # 2 pos - after 4th and 12th hex num
 # 3 pos - after 6th and 10th hex num
 # 4 pos - after 8th hex num
-# 5 pos - in other cases
+# 5 pos - in other cases (1, 3, 5, 7, 9, 11, 13, 15)
 hex_sym_sep: str = " | "
 # separator between hex nums and symbols
 syms_sep: str = ""
@@ -97,20 +97,15 @@ def main(sys_argv: list[str]) -> None:
         file.seek(file_offset, 0)
         spaces_between_hex: int = 0
         for line in range(1, maxy - maxy_minus):
+            stdscr.move(line, hex_start)
             for block in range(16):
                 curr_byte: bytes = file.read(1)
                 hexed_byte: str = curr_byte.hex()
                 hexed_byte: str = hexed_byte.upper() if caps_hex else hexed_byte
-                for num, value in enumerate(((2, 16), (4, 12), (6, 10), (8, 3984))):
-                    if block in value:
-                        spaces_between_hex: int = spaces_hex[num]
-                        break
-                else:
-                    spaces_between_hex: int = spaces_hex[4]
-                stdscr.addstr(line, sum((hex_start, spaces_between_hex, (3*block),
-                                         # Idk how to remove this without breaking an output
-                                         sum(int(block > i) for i in (4, 8, 12)))),
-                              hexed_byte if len(curr_byte) else "..")
+                stdscr.addstr(hexed_byte if len(curr_byte) else "..")
+                stdscr.addstr(" " * spaces_hex[sum(counter if block in i
+                                                   else 0 for counter, i in enumerate(((1, 13), (3, 11), (5, 9), (7,),
+                                                                                       (0, 2, 4, 6, 8, 10, 12, 14))))])
         syms_start: int = sum((hex_start, spaces_between_hex, 45, 3, 2))
 
         for line in range(1, maxy - maxy_minus):
@@ -129,7 +124,7 @@ def main(sys_argv: list[str]) -> None:
                       hex_addr_symbol.upper() if caps_hex else hex_addr_symbol)
         file.seek(file_offset + (cursor[0] * 16) + cursor[1], 0)
         hexed_byte = file.read(1).hex()
-        stdscr.addstr(cursor[0]+1, sum((hex_start, cursor[1]*2, sum(int(cursor[1] > i) for i in (4, 8, 12)))),
+        stdscr.addstr(cursor[0]+1, sum((cursor[1] * 2, ...)),
                       hexed_byte.upper() if caps_hex else hexed_byte, curses.color_pair(1))
 
         stdscr.refresh()
