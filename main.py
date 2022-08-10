@@ -88,6 +88,7 @@ def main(sys_argv: list[str]) -> None:
         for line, offset in zip(range(1, maxy - 1), range(file_offset, file_offset+(16*(maxy-1)), 16)):
             # help
             rjusted_offset: str = (hex(offset))[2:].rjust(max_len, '0')
+            rjusted_offset = rjusted_offset.upper() if caps_hex else rjusted_offset
             stdscr.addstr(line, 0, hex_start := (rjusted_offset + f"{addr_hex_sep}"))
         hex_start: int = len(hex_start)  # later this will be hor cords
         # NO, THIS CAN'T BE REFERENCED BEFORE ASSIGNMENT
@@ -102,7 +103,8 @@ def main(sys_argv: list[str]) -> None:
                 curr_byte: bytes = file.read(1)
                 hexed_byte: str = curr_byte.hex()
                 hexed_byte: str = hexed_byte.upper() if caps_hex else hexed_byte
-                stdscr.addstr(hexed_byte if len(curr_byte) else "..")
+                stdscr.addstr(hexed_byte if len(curr_byte) else "..",
+                              curses.A_NORMAL if len(hexed_byte) else curses.A_DIM)
                 stdscr.addstr(" " * spaces_hex[sum(counter if block in i
                                                    else 0 for counter, i in enumerate(((1, 13), (3, 11), (5, 9), (7,),
                                                                                        (0, 2, 4, 6, 8, 10, 12, 14))))])
@@ -116,40 +118,56 @@ def main(sys_argv: list[str]) -> None:
             for block in range(16):
                 curr_byte: str = file.read(1).decode(curr_encoding, "replace")
                 # i found out that it replaces these symbols with 65533
+                curr_byte: str = curr_byte if curr_byte.isprintable() else "."
                 stdscr.addstr(line, sum((syms_start, block*(len(syms_sep)+1))),
-                              curr_byte if curr_byte.isprintable() else ".")
+                              curr_byte if len(curr_byte) else ".", curses.A_NORMAL if len(curr_byte) else curses.A_DIM)
 
         hex_addr_symbol: str = hex(cursor[1])[2]
         stdscr.addstr(1+cursor[0], hex_start - len(hex_sym_sep),
                       hex_addr_symbol.upper() if caps_hex else hex_addr_symbol)
         file.seek(file_offset + (cursor[0] * 16) + cursor[1], 0)
-        hexed_byte = file.read(1).hex()
-        stdscr.addstr(cursor[0]+1, sum((cursor[1] * 2, ...)),
-                      hexed_byte.upper() if caps_hex else hexed_byte, curses.color_pair(1))
+        hexed_byte: bytes = file.read(1)
+        if not cursor[2]:
+            hexed_byte = hexed_byte.hex()
+            hexed_byte = hexed_byte.upper() if caps_hex else hexed_byte
+            stdscr.addstr(cursor[0]+1, sum((hex_start, cursor[1] * 2,
+                                            sum(spaces_hex[sum(counter if block in i
+                                                else 0 for counter, i in enumerate(((1, 13), (3, 11), (5, 9), (7,),
+                                                                                    (0, 2, 4, 6, 8, 10, 12, 14))))]
+                                                for block in range(0, cursor[1])))),
+                          hexed_byte if len(hexed_byte) else "..", curses.color_pair(1))
+        else:
+            hexed_byte = hexed_byte.decode(curr_encoding, "replace")
+            hexed_byte: str = hexed_byte if hexed_byte.isprintable() else "."
+            stdscr.addstr(cursor[0]+1, sum((syms_start, cursor[1])),
+                          hexed_byte if len(hexed_byte) else ".", curses.color_pair(1))
 
         stdscr.refresh()
 
         user_input = stdscr.getch()
         match user_input:
             case curses.KEY_DOWN:
-                if cursor[0] < maxy - maxy_minus:
+                if cursor[0] < maxy - 3:
                     cursor[0] += 1
                 else:
                     file_offset += 16
             case curses.KEY_UP:
                 if cursor[0] > 0:
                     cursor[0] -= 1
-                else:
-                    if file_offset > 0:
-                        file_offset -= 16
+                elif file_offset > 0:
+                    file_offset -= 16
             case curses.KEY_RIGHT:
                 if cursor[1] < 15:
                     cursor[1] += 1
-                else:
-                    if not cursor[2]:
-                        cursor[2] = 1
+                elif not cursor[2]:
+                    cursor[2] = 1
+                    cursor[1] = 0
             case curses.KEY_LEFT:
-                ...
+                if cursor[1] > 0:
+                    cursor[1] -= 1
+                elif cursor[2]:
+                    cursor[2] = 0
+                    cursor[1] = 15
             case 113:  # ord('q')
                 break
     curses.endwin()
