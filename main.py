@@ -3,6 +3,9 @@ from os import access
 import sys  # sus
 import curses
 import typing
+import string
+# import logging
+# from logging import FileHandler
 
 # -----------------------------------------------------
 filename_pos: int = 1
@@ -33,6 +36,10 @@ syms_sep: str = ""
 
 
 def main(sys_argv: list[str]) -> None:
+    # logger = logging.getLogger(__name__)
+    # logger.setLevel(logging.DEBUG)
+    # handler = FileHandler("a thing.log", encoding="utf8")
+    # logger.addHandler(handler)
     try:
         fname: str = sys_argv[filename_pos]
     except IndexError:
@@ -48,7 +55,8 @@ def main(sys_argv: list[str]) -> None:
     file: typing.BinaryIO = open(fname, mode=f"{'a' if perms[1] and perms[2] else 'r'}+b")
     stdscr = curses.initscr()
     curses.start_color()
-    curses.set_tabsize(4)  # this can be removed bc anyway the's won't be any tabs
+    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
+    curses.set_tabsize(4)  # this can be removed bc anyway there's won't be any tabs
     curses.curs_set(0)
     curses.noecho()
     curses.raw()
@@ -56,22 +64,23 @@ def main(sys_argv: list[str]) -> None:
     # y - vertical
     # x - horizontal
     maxy, maxx = stdscr.getmaxyx()
-    curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
     # dumb python can't understand that {lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms)}
     # is not a generator, so hehe ''.join() go brrrrrrrrrrrr
     perms_str: str = f"[{''.join(lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms))}]"
-    # [vertical, horizontal, field]
+    # [vertical, horizontal, field, second character (only in hex)]
     # field:
     # 0 - hex field
     # 1 - symbols field
-    cursor: list[int, int, int] = [0, 0, 0]
+    # yeah i know that i can simply use bool or smh but who cares
+    cursor: list[int, ...] = [0, 0, 0, 0]
     file_offset: int = 0  # must be file_offset % 16 == 0
     # and yeah, this is also an up left corner
     file_size: int = os.path.getsize(fname)
     size_len: int = len(hex(file_size)) - 2
     curr_encoding: str = "ascii"
+    changes: dict = {}
     while True:
-        # this finally works :)
+        absolute_cursor_pos = sum((file_offset, cursor[0] * 16, cursor[1]))
         stdscr.attron(curses.color_pair(1))
         stdscr.addstr(0, 0, " " * maxx)
         stdscr.addstr(maxy - maxy_minus, 0, " " * (maxx - 1))
@@ -91,9 +100,6 @@ def main(sys_argv: list[str]) -> None:
             rjusted_offset = rjusted_offset.upper() if caps_hex else rjusted_offset
             stdscr.addstr(line, 0, hex_start := (rjusted_offset + f"{addr_hex_sep}"))
         hex_start: int = len(hex_start)  # later this will be hor cords
-        # NO, THIS CAN'T BE REFERENCED BEFORE ASSIGNMENT
-        # BECAUSE I ASSIGNED IN PREVIOUS LINE YOU DUMB PYCHARM
-        # (i fixed it)
 
         file.seek(file_offset, 0)
         spaces_between_hex: int = 0
@@ -147,29 +153,70 @@ def main(sys_argv: list[str]) -> None:
         user_input = stdscr.getch()
         match user_input:
             case curses.KEY_DOWN:
+                if cursor[3]:
+                    changes[absolute_cursor_pos] = int(changes[absolute_cursor_pos] + "0",
+                                                       16).to_bytes(1, byteorder="big")
+                    cursor[3] = 0
                 if cursor[0] < maxy - 3:
                     cursor[0] += 1
                 else:
                     file_offset += 16
             case curses.KEY_UP:
+                if cursor[3]:
+                    changes[absolute_cursor_pos] = int(changes[absolute_cursor_pos] + "0",
+                                                       16).to_bytes(1, byteorder="big")
+                    cursor[3] = 0
                 if cursor[0] > 0:
                     cursor[0] -= 1
                 elif file_offset > 0:
                     file_offset -= 16
             case curses.KEY_RIGHT:
+                if cursor[3]:
+                    changes[absolute_cursor_pos] = int(changes[absolute_cursor_pos] + "0",
+                                                       16).to_bytes(1, byteorder="big")
+                    cursor[3] = 0
                 if cursor[1] < 15:
                     cursor[1] += 1
                 elif not cursor[2]:
                     cursor[2] = 1
                     cursor[1] = 0
             case curses.KEY_LEFT:
+                if cursor[3]:
+                    changes[absolute_cursor_pos] = int(changes[absolute_cursor_pos] + "0",
+                                                       16).to_bytes(1, byteorder="big")
+                    cursor[3] = 0
                 if cursor[1] > 0:
                     cursor[1] -= 1
                 elif cursor[2]:
                     cursor[2] = 0
                     cursor[1] = 15
-            case 113:  # ord('q')
+            # Ctrl+X - quit (and maybe save)
+            case 24:  # ord(Ctrl+X)
+                if len(changes):
+                    for address, value in changes.items():
+                        file.seek(address, 0)
+                        file.write(value)
                 break
+            # Ctrl+S - save
+            case 19:  # ord(Ctrl+S)
+                changes_copy: dict = changes.copy()
+                for address, value in changes.items():
+                    file.seek(address, 0)
+                    file.write(value)
+                    changes_copy.pop(address)
+                changes = changes_copy.copy()
+                del changes_copy
+            case _:
+                pass
+
+        if chr(user_input) in string.hexdigits:
+            if absolute_cursor_pos in changes:
+                changes[absolute_cursor_pos] = int(changes[absolute_cursor_pos] + user_input,
+                                                   16).to_bytes(1, byteorder="big")
+                cursor[3] = 0
+            else:
+                changes[absolute_cursor_pos] = user_input
+                cursor[3] = 1
     curses.endwin()
     file.close()
 
