@@ -7,29 +7,26 @@ import string
 import logging
 
 # -----------------------------------------------------
-filename_pos: int = 1
+FILENAME_POS: int = 1
 # position of filename in argv (0~inf)
-caps_hex: bool = True
+HEX_CAPS: bool = True
 # if true, 234 in hex will be 0xEA
 # else if false, it will be 0xea
-min_addr_num: int = 8
+MIN_ADDR_NUM: int = 8
 # minimum amount of nums in address
 # std 8 - 32 bit offset which looks like "00000000",
 # "00000010", "00000020", and etc
-addr_hex_sep: str = "| "
+ADDR_HEX_SEP: str = "| "
 # separator which stands between address and hex nums
-maxy_minus: int = 1
-# maxy_minus is number of rows, which must be minused
-# to make correct output
-spaces_hex: tuple = (1, 2, 1, 2, 1)
+SPACES_HEX: tuple = (1, 2, 1, 2, 1)
 # 1 pos - after 2nd and 14th hex num
 # 2 pos - after 4th and 12th hex num
 # 3 pos - after 6th and 10th hex num
 # 4 pos - after 8th hex num
 # 5 pos - in other cases (1, 3, 5, 7, 9, 11, 13, 15)
-hex_sym_sep: str = " | "
+HEX_SYM_SEP: str = " | "
 # separator between hex nums and symbols
-syms_sep: str = ""
+SYMS_SEP: str = ""
 # separator between symbols
 # -----------------------------------------------------
 
@@ -45,7 +42,7 @@ def main(sys_argv: list[str]) -> None:
     logger.info("Start logging...")
 
     try:
-        fname: str = sys_argv[filename_pos]
+        fname: str = sys_argv[FILENAME_POS]
         logger.info("Got filename...")
     except IndexError:
         logger.info("Haven't got filename, exit")
@@ -96,7 +93,7 @@ def main(sys_argv: list[str]) -> None:
         logger.debug(f"\n{cursor=}\n{file_offset=}\n{curr_encoding=}\n{changes=}\n")
         stdscr.attron(curses.color_pair(1))
         stdscr.addstr(0, 0, " " * maxx)
-        stdscr.addstr(maxy - maxy_minus, 0, " " * (maxx - 1))
+        stdscr.addstr(maxy - 1, 0, " " * (maxx - 1))
         stdscr.addstr(0, 2, perms_str)
         stdscr.addstr(0, int((maxx-len(fname)) / 2), f"[{fname}]")
         stdscr.addstr(0, int(maxx-13), "[Modified]" if changes else "")
@@ -105,26 +102,26 @@ def main(sys_argv: list[str]) -> None:
 
         # added it here because after any input sign "[Saved]" will be erased by code above
         # and if i move input-part here, weird bug appears
-        stdscr.addstr(maxy - maxy_minus, int(maxx / 2),
+        stdscr.addstr(maxy - 1, int(maxx / 2),
                       "[Saved]" if user_input == 19 else "",
                       curses.color_pair(1))
 
         # this must be optimized
-        max_len: int = min_addr_num
+        max_addr_len: int = MIN_ADDR_NUM
         hex_start: str = ''
         for offset in range(file_offset, file_offset+(16*(maxy-1)), 16):
             rjusted_offset: str = (hex(offset))[2:].rjust(len(hex(file_size)) - 2, '0')
-            max_len: int = len(rjusted_offset) if len(rjusted_offset) > max_len else max_len
+            max_addr_len: int = len(rjusted_offset) if len(rjusted_offset) > max_addr_len else max_addr_len
         for line, offset in zip(range(1, maxy - 1), range(file_offset, file_offset+(16*(maxy-1)), 16)):
             # help
-            rjusted_offset: str = (hex(offset))[2:].rjust(max_len, '0')
-            rjusted_offset = rjusted_offset.upper() if caps_hex else rjusted_offset
-            stdscr.addstr(line, 0, hex_start := (rjusted_offset + f"{addr_hex_sep}"))
+            rjusted_offset: str = (hex(offset))[2:].rjust(max_addr_len, '0')
+            rjusted_offset = rjusted_offset.upper() if HEX_CAPS else rjusted_offset
+            stdscr.addstr(line, 0, hex_start := (rjusted_offset + f"{ADDR_HEX_SEP}"))
         hex_start: int = len(hex_start)  # later this will be hor cords
 
         file.seek(file_offset, 0)
         spaces_between_hex: int = 0
-        for line in range(1, maxy - maxy_minus):
+        for line in range(1, maxy - 1):
             stdscr.move(line, hex_start)
             for block in range(16):
                 absolute_print_cursor_pos = sum((file_offset, (line-1)*16, block))
@@ -136,20 +133,18 @@ def main(sys_argv: list[str]) -> None:
                     file.seek(1, 1)
                     color = curses.color_pair(2)
                 hexed_byte: str = curr_byte.hex()
-                hexed_byte: str = hexed_byte.upper() if caps_hex else hexed_byte
-                stdscr.addstr(hexed_byte if len(hexed_byte) else "..",
-                              color)
-                stdscr.addstr(" " * spaces_hex[sum(counter if block in i
+                hexed_byte: str = hexed_byte.upper() if HEX_CAPS else hexed_byte
+                stdscr.addstr(hexed_byte if len(hexed_byte) else "..", color)
+                stdscr.addstr(" " * SPACES_HEX[sum(counter if block in i
                                                    else 0 for counter, i in enumerate(((1, 13), (3, 11), (5, 9), (7,),
                                                                                        (0, 2, 4, 6, 8, 10, 12, 14))))])
-                stdscr.attroff(curses.color_pair(2))
         syms_start: int = sum((hex_start, spaces_between_hex, 45, 3, 2))
 
-        for line in range(1, maxy - maxy_minus):
-            stdscr.addstr(line, syms_start, f"{hex_sym_sep}")
-        syms_start += len(hex_sym_sep)
+        for line in range(1, maxy - 1):
+            stdscr.addstr(line, syms_start, f"{HEX_SYM_SEP}")
+        syms_start += len(HEX_SYM_SEP)
         file.seek(file_offset, 0)
-        for line in range(1, maxy - maxy_minus):
+        for line in range(1, maxy - 1):
             for block in range(16):
                 absolute_print_cursor_pos = sum((file_offset, (line - 1) * 16, block))
                 if absolute_print_cursor_pos not in changes:
@@ -162,13 +157,12 @@ def main(sys_argv: list[str]) -> None:
                 curr_byte: str = curr_byte.decode(curr_encoding, "replace")
                 # i found out that it replaces these symbols with 65533
                 curr_byte: str = curr_byte if curr_byte.isprintable() else "."
-                stdscr.addstr(line, sum((syms_start, block*(len(syms_sep)+1))),
-                              curr_byte if len(curr_byte) else ".",
-                              color)
+                stdscr.addstr(line, sum((syms_start, block*(len(SYMS_SEP)+1))),
+                              curr_byte if len(curr_byte) else ".", color)
 
         hex_addr_symbol: str = hex(cursor[1])[2]
-        stdscr.addstr(1+cursor[0], hex_start - len(hex_sym_sep),
-                      hex_addr_symbol.upper() if caps_hex else hex_addr_symbol)
+        stdscr.addstr(1+cursor[0], max_addr_len - 1,
+                      hex_addr_symbol.upper() if HEX_CAPS else hex_addr_symbol)
         file.seek(file_offset + (cursor[0] * 16) + cursor[1], 0)
         if absolute_cursor_pos not in changes:
             hexed_byte: bytes = file.read(1)
@@ -178,9 +172,9 @@ def main(sys_argv: list[str]) -> None:
             color = curses.color_pair(3)
         if not cursor[2]:
             hexed_byte = hexed_byte.hex()
-            hexed_byte = hexed_byte.upper() if caps_hex else hexed_byte
+            hexed_byte = hexed_byte.upper() if HEX_CAPS else hexed_byte
             stdscr.addstr(cursor[0]+1, sum((hex_start, cursor[1] * 2,
-                                            sum(spaces_hex[sum(counter if block in i
+                                            sum(SPACES_HEX[sum(counter if block in i
                                                 else 0 for counter, i in enumerate(((1, 13), (3, 11), (5, 9), (7,),
                                                                                     (0, 2, 4, 6, 8, 10, 12, 14))))]
                                                 for block in range(cursor[1])))),
@@ -226,17 +220,9 @@ def main(sys_argv: list[str]) -> None:
                 elif cursor[2]:
                     cursor[2] = 0
                     cursor[1] = 15
-            # Ctrl+X - quit (and maybe save)
             case 24:  # ord(Ctrl+X)
                 if len(changes):
                     choice = 0
-                    """
-                    +------------------------------------------+
-                    | Do you want to save changes before exit? |
-                    |                                          |
-                    |       [Edit]      [No]      [Yes]        |
-                    +------------------------------------------+
-                    """
                     stdscr.addstr(int(maxy/2)-2, int((maxx-45)/2), f"+{'-' * 42}+")
                     stdscr.addstr(int(maxy/2)-1, int((maxx-45)/2), "| Do you want to save changes before exit? |")
                     stdscr.addstr(int(maxy/2), int((maxx-45)/2), f"|{' ' * 42}|")
@@ -269,7 +255,6 @@ def main(sys_argv: list[str]) -> None:
                         break
                 else:
                     break
-            # Ctrl+S - save
             case 19:  # ord(Ctrl+S)
                 logger.debug("user pressed Ctrl+S...")
                 changes_copy: dict = changes.copy()
