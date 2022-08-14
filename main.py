@@ -80,10 +80,10 @@ def main(sys_argv: list[str]) -> None:
     # dumb python can't understand that {lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms)}
     # is not a generator, so hehe ''.join() go brrrrrrrrrrrr
     perms_str: str = f"[{''.join(lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms))}]"
-    # [vertical, horizontal, field, second character (only in hex)]
-    # field:
-    # 0 - hex field
-    # 1 - symbols field
+    # [vertical, horizontal, section, second character (only in hex)]
+    # section:
+    # 0 - hex section
+    # 1 - symbols section
     # yeah i know that i can simply use bool or smh but who cares
     cursor: list[int, ...] = [0, 0, 0, 0]
     file_offset: int = 0  # must be file_offset % 16 == 0
@@ -151,12 +151,20 @@ def main(sys_argv: list[str]) -> None:
         file.seek(file_offset, 0)
         for line in range(1, maxy - maxy_minus):
             for block in range(16):
-                curr_byte: str = file.read(1).decode(curr_encoding, "replace")
+                absolute_print_cursor_pos = sum((file_offset, (line - 1) * 16, block))
+                if absolute_print_cursor_pos not in changes:
+                    curr_byte: bytes = file.read(1)
+                    color = curses.A_NORMAL if len(curr_byte) else curses.A_DIM
+                else:
+                    curr_byte: bytes = changes[absolute_print_cursor_pos]
+                    file.seek(1, 1)
+                    color = curses.color_pair(2)
+                curr_byte: str = curr_byte.decode(curr_encoding, "replace")
                 # i found out that it replaces these symbols with 65533
                 curr_byte: str = curr_byte if curr_byte.isprintable() else "."
                 stdscr.addstr(line, sum((syms_start, block*(len(syms_sep)+1))),
                               curr_byte if len(curr_byte) else ".",
-                              curses.A_NORMAL if len(curr_byte) else curses.A_DIM)
+                              color)
 
         hex_addr_symbol: str = hex(cursor[1])[2]
         stdscr.addstr(1+cursor[0], hex_start - len(hex_sym_sep),
@@ -275,9 +283,10 @@ def main(sys_argv: list[str]) -> None:
             case _:
                 pass
 
-        if chr(user_input) in string.hexdigits:
+        if chr(user_input) in string.hexdigits and not cursor[2]:
             user_input = chr(user_input)
-            if absolute_cursor_pos in changes:
+            if absolute_cursor_pos in changes and cursor[3]:
+                logger.debug(f"{user_input=}\n{changes[absolute_cursor_pos]=}")
                 changes[absolute_cursor_pos] = (int.from_bytes(changes[absolute_cursor_pos],
                                                                byteorder="big", signed=False) +
                                                 int(user_input, 16)).to_bytes(1, byteorder="big")
@@ -285,6 +294,8 @@ def main(sys_argv: list[str]) -> None:
             else:
                 changes[absolute_cursor_pos] = (int(user_input, 16) * 16).to_bytes(1, byteorder="big")
                 cursor[3] = 1
+        elif chr(user_input) in string.printable:
+            changes[absolute_cursor_pos] = chr(user_input).encode(curr_encoding)
     curses.endwin()
     file.close()
 
