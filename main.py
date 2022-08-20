@@ -1,12 +1,12 @@
-import os
-from os import access
-import sys  # sus
 import curses
-import typing
 import string
+import os
+import sys  # sus
+import typing
 import logging
+from os import access
 
-# -----------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 FILENAME_POS: int = 1
 # position of filename in argv (0~inf)
 HEX_CAPS: bool = True
@@ -23,41 +23,52 @@ SPACES_HEX: tuple = (1, 2, 1, 2, 1)
 # 2 pos - after 4th and 12th hex num
 # 3 pos - after 6th and 10th hex num
 # 4 pos - after 8th hex num
-# 5 pos - in other cases (1, 3, 5, 7, 9, 11, 13, 15)
+# 5 pos - in other cases (1, 3, 5, 7, 9, 11, 13)
 HEX_SYM_SEP: str = " | "
 # separator between hex nums and symbols
 SYMS_SEP: str = ""
 # separator between symbols
-# -----------------------------------------------------
+MONOSPACED_65533: bool = False
+# In some terminals (or OS? Fonts?), replacement symbol is
+# not monospaced (so it breaks the output in some terminals
+# (like konsole), but in some not (wsl in windows terminal))
+# if false, 65533 will be replaced with REPLACEMENT_CHAR
+REPLACEMENT_CHAR: str = "."
+# Read comment above
+LOGGING_LEVEL: int = logging.DEBUG
+LOGS_FILENAME: str = "pyhex_logs.log"
+LOGS_FORMAT: tuple = ("[%(asctime)s] %(levelname)s: %(message)s", "%H:%M.%S")
+# ----------------------------------------------------------------------------------------------------------------------
 
 
 def main(sys_argv: list[str]) -> None:
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    file_handler = logging.FileHandler("pyhex_logs.log")
+    logger.setLevel(LOGGING_LEVEL)
+    file_handler = logging.FileHandler(LOGS_FILENAME)
     file_handler.setLevel(logging.DEBUG)
-    logger_formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", "%H:%M.%S")
+    logger_formatter = logging.Formatter(*LOGS_FORMAT)
     file_handler.setFormatter(logger_formatter)
     logger.addHandler(file_handler)
     logger.info("Start logging...")
 
     try:
         fname: str = sys_argv[FILENAME_POS]
-        logger.info("Got filename...")
+        logger.info(f"Got filename!")
     except IndexError:
-        logger.info("Haven't got filename, exit")
+        logger.error(f"Not enought arguments (waited 2, got <2)")
         raise ValueError("not enough arguments.") from None
     perms: tuple[bool, ...] = tuple([access(fname, perm) for perm in (os.F_OK,    # existance
                                                                       os.R_OK,    # readable
                                                                       os.W_OK,    # writeable
                                                                       os.X_OK)])  # executable
+    logger.info(f"Permissions: {perms}")
     # tbh all perms except writeable and executable can be removed
     # bc anyway if below won't let you further
     if not perms[1]:
-        logger.info(f"\"{fname}\" can't be {'read' if perms[0] else 'opened'}, exit")
-        raise PermissionError(f"\"{fname}\" can't be {'read' if perms[0] else 'opened'}.")
+        logger.error(f"\"{fname}\" is not accessible.")
+        raise PermissionError(f"\"{fname}\" is not accessible.")
     file: typing.BinaryIO = open(fname, mode=f"rb{'+' if perms[1] and perms[2] else ''}")
-    logger.info(f"Opened \"{fname}\"")
+    logger.debug(f"Successfully opened \"{fname}\"")
     stdscr = curses.initscr()
     curses.start_color()
     # color_pair(1) - inverted colors
@@ -74,27 +85,25 @@ def main(sys_argv: list[str]) -> None:
     # y - vertical
     # x - horizontal
     maxy, maxx = stdscr.getmaxyx()
-    # dumb python can't understand that {lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms)}
-    # is not a generator, so hehe ''.join() go brrrrrrrrrrrr
+    logger.debug(f"Screen size: {maxx}x{maxy} lines")
     perms_str: str = f"[{''.join(lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms))}]"
     # [vertical, horizontal, section, second character (only in hex)]
     # section:
     # 0 - hex section
     # 1 - symbols section
-    # yeah i know that i can simply use bool or smh but who cares
-    cursor: list[int, ...] = [0, 0, 0, 0]
+    cursor: list[int, ...] = [0, 0, False, False]
     file_offset: int = 0  # must be file_offset % 16 == 0
     # and yeah, this is also an up left corner
-    file_size: int = os.path.getsize(fname)
     curr_encoding: str = "ascii"
     changes: dict = {}
     user_input = 0
     while True:
-        logger.debug(f"\n{cursor=}\n{file_offset=}\n{curr_encoding=}\n{changes=}\n")
+        stdscr.erase()
         stdscr.attron(curses.color_pair(1))
         stdscr.addstr(0, 0, " " * maxx)
         stdscr.addstr(maxy - 1, 0, " " * (maxx - 1))
         stdscr.addstr(0, 2, perms_str)
+        stdscr.addstr(0, 10, f"[{curr_encoding}]")
         stdscr.addstr(0, int((maxx-len(fname)) / 2), f"[{fname}]")
         stdscr.addstr(0, int(maxx-13), "[Modified]" if changes else "")
         stdscr.attroff(curses.color_pair(1))
@@ -110,7 +119,7 @@ def main(sys_argv: list[str]) -> None:
         max_addr_len: int = MIN_ADDR_NUM
         hex_start: str = ''
         for offset in range(file_offset, file_offset+(16*(maxy-1)), 16):
-            rjusted_offset: str = (hex(offset))[2:].rjust(len(hex(file_size)) - 2, '0')
+            rjusted_offset: str = (hex(offset))[2:].rjust(len(hex(os.path.getsize(fname))) - 2, '0')
             max_addr_len: int = len(rjusted_offset) if len(rjusted_offset) > max_addr_len else max_addr_len
         for line, offset in zip(range(1, maxy - 1), range(file_offset, file_offset+(16*(maxy-1)), 16)):
             # help
@@ -118,6 +127,7 @@ def main(sys_argv: list[str]) -> None:
             rjusted_offset = rjusted_offset.upper() if HEX_CAPS else rjusted_offset
             stdscr.addstr(line, 0, hex_start := (rjusted_offset + f"{ADDR_HEX_SEP}"))
         hex_start: int = len(hex_start)  # later this will be hor cords
+        logger.debug(f"Start of hex section: {hex_start}")
 
         file.seek(file_offset, 0)
         spaces_between_hex: int = 0
@@ -129,7 +139,7 @@ def main(sys_argv: list[str]) -> None:
                     curr_byte: bytes = file.read(1)
                     color = curses.A_NORMAL if len(curr_byte) else curses.A_DIM
                 else:
-                    curr_byte: bytes = changes[absolute_print_cursor_pos]
+                    curr_byte: bytes = changes[absolute_print_cursor_pos][0]
                     file.seek(1, 1)
                     color = curses.color_pair(2)
                 hexed_byte: str = curr_byte.hex()
@@ -139,6 +149,7 @@ def main(sys_argv: list[str]) -> None:
                                                    else 0 for counter, i in enumerate(((1, 13), (3, 11), (5, 9), (7,),
                                                                                        (0, 2, 4, 6, 8, 10, 12, 14))))])
         syms_start: int = sum((hex_start, spaces_between_hex, 45, 3, 2))
+        logger.debug(f"Start of symbols section: {syms_start}")
 
         for line in range(1, maxy - 1):
             stdscr.addstr(line, syms_start, f"{HEX_SYM_SEP}")
@@ -151,11 +162,12 @@ def main(sys_argv: list[str]) -> None:
                     curr_byte: bytes = file.read(1)
                     color = curses.A_NORMAL if len(curr_byte) else curses.A_DIM
                 else:
-                    curr_byte: bytes = changes[absolute_print_cursor_pos]
+                    curr_byte: bytes = changes[absolute_print_cursor_pos][0]
                     file.seek(1, 1)
                     color = curses.color_pair(2)
                 curr_byte: str = curr_byte.decode(curr_encoding, "replace")
-                # i found out that it replaces these symbols with 65533
+                curr_byte: str = curr_byte if MONOSPACED_65533 else (REPLACEMENT_CHAR if curr_byte == "�"
+                                                                     else curr_byte)
                 curr_byte: str = curr_byte if curr_byte.isprintable() else "."
                 stdscr.addstr(line, sum((syms_start, block*(len(SYMS_SEP)+1))),
                               curr_byte if len(curr_byte) else ".", color)
@@ -168,7 +180,7 @@ def main(sys_argv: list[str]) -> None:
             hexed_byte: bytes = file.read(1)
             color = curses.color_pair(1)
         else:
-            hexed_byte: bytes = changes[absolute_cursor_pos]
+            hexed_byte: bytes = changes[absolute_cursor_pos][0]
             color = curses.color_pair(3)
         if not cursor[2]:
             hexed_byte = hexed_byte.hex()
@@ -181,65 +193,155 @@ def main(sys_argv: list[str]) -> None:
                           hexed_byte if len(hexed_byte) else "..", color)
         else:
             hexed_byte = hexed_byte.decode(curr_encoding, "replace")
+            hexed_byte: str = hexed_byte if MONOSPACED_65533 else (REPLACEMENT_CHAR if hexed_byte == "�"
+                                                                   else hexed_byte)
             hexed_byte: str = hexed_byte if hexed_byte.isprintable() else "."
             stdscr.addstr(cursor[0]+1, sum((syms_start, cursor[1])),
                           hexed_byte if len(hexed_byte) else ".", color)
-        stdscr.attroff(curses.color_pair(3))
-
-        stdscr.refresh()
 
         user_input = stdscr.getch()
+        logger.debug(f"User pressed {chr(user_input)} ({user_input})")
         match user_input:
             case curses.KEY_DOWN:
-                if cursor[3]:
-                    cursor[3] = 0
+                cursor[3] = False
                 if cursor[0] < maxy - 3:
                     cursor[0] += 1
                 else:
                     file_offset += 16
             case curses.KEY_UP:
-                if cursor[3]:
-                    cursor[3] = 0
+                cursor[3] = False
                 if cursor[0] > 0:
                     cursor[0] -= 1
                 elif file_offset > 0:
                     file_offset -= 16
             case curses.KEY_RIGHT:
-                if cursor[3]:
-                    cursor[3] = 0
+                cursor[3] = False
                 if cursor[1] < 15:
                     cursor[1] += 1
                 elif not cursor[2]:
-                    cursor[2] = 1
+                    cursor[2] = not cursor[2]
                     cursor[1] = 0
             case curses.KEY_LEFT:
-                if cursor[3]:
-                    cursor[3] = 0
+                cursor[3] = False
                 if cursor[1] > 0:
                     cursor[1] -= 1
                 elif cursor[2]:
-                    cursor[2] = 0
+                    cursor[2] = not cursor[2]
                     cursor[1] = 15
+            case 5:  # ord(Ctrl+E)
+                import pkgutil
+                import encodings
+                encodes = set(name for imp, name, ispkg in pkgutil.iter_modules(encodings.__path__) if not ispkg)
+                del pkgutil, encodings
+                logger.debug(f"All encodings: {encodes}")
+                encodes.difference_update({"aliases"})
+                logger.debug(f"Encodings without aliases: {encodes}")
+                encodes = tuple(sorted(x for x in encodes
+                                       if x not in ("idna", "mbcs", "oem", "palmos", "zlib_codec", "punycode", "rot_13",
+                                                    "raw_unicode_escape", "hex_codec", "unicode_escape", "base64_codec",
+                                                    "quopri_codec", "bz2_codec", "uu_codec", "undefined")))
+                logger.debug(f"Encodings without specifics: {encodes}")
+                temp = 0
+                # (tuple cursor, cursor)
+                encode_cursor = (0, 0)
+                for encoding in encodes:
+                    temp = temp if temp > len(encoding) else len(encoding)
+                temp = int(temp/2) + 2
+                stdscr.addstr(1,      int(maxx/2)-temp-2, f"+{'-' * (temp * 2 + 2)}+")
+                stdscr.addstr(maxy-2, int(maxx/2)-temp-2, f"+{'-' * (temp * 2 + 2)}+")
+                while True:
+                    logger.debug(f"Encoding cursor pos: {encode_cursor}")
+                    for encoding, line in zip(encodes[encode_cursor[0]:], range(2, maxy-2)):
+                        stdscr.addstr(line, int(maxx/2)-temp-2, f"| {encoding.ljust(temp*2)} |")
+                    stdscr.addstr(maxy-2, int(maxx/2)+temp-5, f"""[{'↑' if encode_cursor[0] else '-'}|{
+                                                                    '-' if encode_cursor[0] == len(encodes)-maxy+4
+                                                                    else '↓'}]""")
+                    stdscr.addstr(encode_cursor[1]+2, int(maxx/2)-temp-1,
+                                  f">{encodes[sum(encode_cursor)]}<", curses.color_pair(1))
+                    temp_input = stdscr.getch()
+                    logger.debug(f"User Pressed {temp_input}")
+                    match temp_input:
+                        case curses.KEY_DOWN:
+                            if sum(encode_cursor) == len(encodes)-1:
+                                pass
+                            elif encode_cursor[1] == maxy-5:
+                                encode_cursor = (encode_cursor[0]+1, encode_cursor[1])
+                            else:
+                                encode_cursor = (encode_cursor[0], encode_cursor[1]+1)
+                        case curses.KEY_UP:
+                            if not sum(encode_cursor):
+                                pass
+                            elif encode_cursor[1] == 0:
+                                encode_cursor = (encode_cursor[0]-1, encode_cursor[1])
+                            else:
+                                encode_cursor = (encode_cursor[0], encode_cursor[1]-1)
+                        case 10:  # ord(Enter)
+                            temp = curr_encoding
+                            curr_encoding = encodes[sum(encode_cursor)]
+                            break
+                        case 27:
+                            break
+                logger.debug(f"Changed {temp} encoding to {curr_encoding}")
+                del encodes, encode_cursor, temp
+            case 7:  # ord(Ctrl+G)
+                temp = ""
+                """
+                +------------------+
+                | Go to address:   |
+                | ________________ |
+                +------------------+
+                """
+                for line, line_value in zip(range(-2, 2), (f"+{'-'*18}+", "| Go to address:   |",
+                                                           f"| {'_'*16} |", f"+{'-' * 18}+")):
+                    stdscr.addstr(int(maxy/2)+line, int(maxx/2)-10, line_value)
+                while True:
+                    logger.debug(f"Goto address: \"{temp}\"")
+                    stdscr.addstr(int(maxy/2), int(maxx/2)-8, temp.upper() if HEX_CAPS else temp)
+                    stdscr.addstr(int(maxy/2), int(maxx/2)-8+len(temp), "_", curses.color_pair(1))
+
+                    temp_input = stdscr.getch()
+                    logger.debug(f"User pressed {temp_input}")
+                    match temp_input:
+                        case 10:  # ord(Enter)
+                            if len(temp):
+                                temp = int(temp, 16)
+                                file_offset, cursor[0], cursor[1] = (temp - temp % 16, 0, temp % 16)
+                                break
+                        case 27:  # ord(Esc)
+                            break
+                        case 263:  # ord(Backspace)
+                            temp = temp[:-1]
+                        case _:
+                            if chr(temp_input) in string.hexdigits:
+                                temp += chr(temp_input)
+                if temp_input in (10, 27):
+                    del temp
+            case 19:  # ord(Ctrl+S)
+                temp = changes.copy()
+                for address, value in changes.items():
+                    file.seek(address, 0)
+                    file.write(value[0])
+                    temp.pop(address)
+                changes = temp.copy()
+                del temp
             case 24:  # ord(Ctrl+X)
                 if len(changes):
                     choice = 0
-                    stdscr.addstr(int(maxy/2)-2, int((maxx-45)/2), f"+{'-' * 42}+")
-                    stdscr.addstr(int(maxy/2)-1, int((maxx-45)/2), "| Do you want to save changes before exit? |")
-                    stdscr.addstr(int(maxy/2), int((maxx-45)/2), f"|{' ' * 42}|")
-                    stdscr.addstr(int(maxy/2)+1, int((maxx-45)/2), "|       [Edit]      [No]      [Yes]        |")
-                    stdscr.addstr(int(maxy/2)+2, int((maxx-45)/2), f"+{'-' * 42}+")
+                    for line, line_value in zip(range(-2, 3),
+                                                (f"+{'-' * 42}+", "| Do you want to save changes before exit? |",
+                                                 f"|{' ' * 42}|", "|       [Edit]      [No]      [Yes]        |",
+                                                 f"+{'-' * 42}+")):
+                        stdscr.addstr(int(maxy/2)+line, int((maxx-45)/2), line_value)
                     while True:
-                        stdscr.addstr(int(maxy / 2) + 1, int(maxx / 2) - 16,
-                                      "[Edit]".rjust(7, ">" if not choice
-                                                     else " ").ljust(8, "<" if not choice else " "))
-                        stdscr.addstr(int(maxy / 2) + 1, int(maxx / 2) - 4,
-                                      "[No]".rjust(5, ">" if choice == 1
-                                                   else " ").ljust(6, "<" if choice == 1 else " "))
-                        stdscr.addstr(int(maxy / 2) + 1, int(maxx / 2) + 6,
-                                      "[Yes]".rjust(6, ">" if choice == 2
-                                                    else " ").ljust(7, "<" if choice == 2 else " "))
-                        user_inp = stdscr.getch()
-                        match user_inp:
+                        logger.debug(f"User's choice: {choice}")
+                        for offset, button, choice_var in zip((-16, -4, 6), ("[Edit]", "[No]", "[Yes]"), range(3)):
+                            stdscr.addstr(int(maxy / 2) + 1, int(maxx / 2) + offset,
+                                          button.rjust(len(button)+1, ">" if choice == choice_var
+                                                       else " ").ljust(len(button)+2,
+                                                                       "<" if choice == choice_var else " "))
+                        temp_input = stdscr.getch()
+                        logger.debug(f"User's input: {temp_input}")
+                        match temp_input:
                             case curses.KEY_RIGHT:
                                 choice += 1 if choice < 2 else 0
                             case curses.KEY_LEFT:
@@ -251,36 +353,46 @@ def main(sys_argv: list[str]) -> None:
                     elif choice == 2:
                         for address, value in changes.items():
                             file.seek(address, 0)
-                            file.write(value)
+                            file.write(value[0])
                         break
+                    del temp_input
                 else:
                     break
-            case 19:  # ord(Ctrl+S)
-                logger.debug("user pressed Ctrl+S...")
-                changes_copy: dict = changes.copy()
+            case 26:  # ord(Ctrl+Z)
+                temp = (-1, -1)
                 for address, value in changes.items():
-                    file.seek(address, 0)
-                    file.write(value)
-                    changes_copy.pop(address)
-                    logger.debug(f"Saved {value} on {address}")
-                changes = changes_copy.copy()
-                del changes_copy
+                    temp = temp if temp[1] > value[1] else (address, value[1])
+                if temp[1] != -1:
+                    del changes[temp[0]]
+                    del temp
             case _:
-                pass
-
-        if chr(user_input) in string.hexdigits and not cursor[2]:
-            user_input = chr(user_input)
-            if absolute_cursor_pos in changes and cursor[3]:
-                logger.debug(f"{user_input=}\n{changes[absolute_cursor_pos]=}")
-                changes[absolute_cursor_pos] = (int.from_bytes(changes[absolute_cursor_pos],
-                                                               byteorder="big", signed=False) +
-                                                int(user_input, 16)).to_bytes(1, byteorder="big")
-                cursor[3] = 0
-            else:
-                changes[absolute_cursor_pos] = (int(user_input, 16) * 16).to_bytes(1, byteorder="big")
-                cursor[3] = 1
-        elif chr(user_input) in string.printable:
-            changes[absolute_cursor_pos] = chr(user_input).encode(curr_encoding)
+                if chr(user_input) in string.hexdigits and not cursor[2]:
+                    user_input = chr(user_input)
+                    if absolute_cursor_pos in changes and cursor[3]:
+                        changes[absolute_cursor_pos] = ((int.from_bytes(changes[absolute_cursor_pos][0],
+                                                                        byteorder="big", signed=False) +
+                                                        int(user_input, 16)).to_bytes(1, byteorder="big"),
+                                                        changes[absolute_cursor_pos][1])
+                    else:
+                        temp = 0
+                        for value in changes.values():
+                            temp = temp if temp == value[1] else value[1]
+                        changes[absolute_cursor_pos] = ((int(user_input, 16) * 16).to_bytes(1, byteorder="big"), temp)
+                        del temp
+                    cursor[3] = not cursor[3]
+                elif chr(user_input) in string.printable and cursor[2]:
+                    temp = 0
+                    for value in changes.values():
+                        temp = temp if temp == value[1] else value[1]
+                    changes[absolute_cursor_pos] = (chr(user_input).encode(curr_encoding), temp)
+                    del temp
+                temp = changes.copy()
+                for address, value in changes.items():
+                    file.seek(address)
+                    if file.read(1) == value[0]:
+                        del temp[address]
+                changes = temp
+                del temp
     curses.endwin()
     file.close()
 
