@@ -1,6 +1,7 @@
 import curses
 import string
 import os
+import struct
 import sys  # sus
 import typing
 import logging
@@ -28,6 +29,7 @@ HEX_SYM_SEP: str = " | "
 # separator between hex nums and symbols
 SYMS_SEP: str = ""
 # separator between symbols
+SYMS_STATS_SEP = " | "
 MONOSPACED_65533: bool = False
 # In some terminals (or OS? Fonts?), replacement symbol is
 # not monospaced (so it breaks the output in some terminals
@@ -171,6 +173,42 @@ def main(sys_argv: list[str]) -> None:
                 curr_byte: str = curr_byte if curr_byte.isprintable() else "."
                 stdscr.addstr(line, sum((syms_start, block*(len(SYMS_SEP)+1))),
                               curr_byte if len(curr_byte) else ".", color)
+
+        stats_start = syms_start + 16
+        for line in range(1, maxy - 1):
+            stdscr.addstr(line, stats_start, f"{SYMS_STATS_SEP}")
+        stats_start += len(SYMS_STATS_SEP)
+        for line, line_value in zip(range(17), [f"{i.ljust(10)}(8 bit):" for i in ("Binary", "Octal", "Hex", "Signed",
+                                                                                   "Unsigned")] +
+                                               [f"{i.ljust(9)}(16 bit):" for i in ("Raw", "Signed", "Unsigned")] +
+                                               [f"{i.ljust(9)}(32 bit):" for i in ("Raw", "Signed", "Unsigned")] +
+                                               [f"{i.ljust(9)}(64 bit):" for i in ("Raw", "Signed", "Unsigned")] +
+                                               [f"Float    ({i} bit):" for i in (2 ** i for i in range(4, 7))]):
+            stdscr.addstr(line + 1, stats_start, line_value)
+        stats_start += 19
+        line = 1
+        file.seek(sum((file_offset, cursor[0] * 16, cursor[1])), 0)
+        curr_segment = file.read(8).ljust(8, b"\x00")
+        for func, leng in zip((bin, oct, hex), (8, 3, 2)):
+            temp = func(curr_segment[0])[2:].rjust(leng, "0")
+            stdscr.addstr(line, stats_start, temp.upper() if HEX_CAPS else temp)
+            line += 1
+        for signed in (True, False):
+            stdscr.addstr(line, stats_start, str(int.from_bytes(curr_segment[:1], byteorder='big',
+                                                                signed=signed)).rjust(4))
+            line += 1
+        for i in (2 ** i for i in range(1, 4)):
+            temp = curr_segment[:i]
+            stdscr.addstr(line, stats_start, temp.hex().upper() if HEX_CAPS else temp.hex())
+            line += 1
+            for signed in (True, False):
+                stdscr.addstr(line, stats_start, str(int.from_bytes(curr_segment[:1], byteorder='big',
+                                                                    signed=signed)).rjust(4))
+                line += 1
+        for i, float_symbol in zip((2 ** i for i in range(1, 4)), tuple("efd")):
+            temp = curr_segment[:i]
+            stdscr.addstr(line, stats_start, f"{struct.unpack(f'>{float_symbol}', temp)[0]}")
+            line += 1
 
         hex_addr_symbol: str = hex(cursor[1])[2]
         stdscr.addstr(1+cursor[0], max_addr_len - 1,
