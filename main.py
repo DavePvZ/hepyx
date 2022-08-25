@@ -5,6 +5,7 @@ import struct
 import sys  # sus
 import typing
 import logging
+import itertools
 from os import access
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -37,6 +38,9 @@ MONOSPACED_65533: bool = False
 # if false, 65533 will be replaced with REPLACEMENT_CHAR
 REPLACEMENT_CHAR: str = "."
 # Read comment above
+LOGS_ENABLED: bool = True
+# Set this to False if you want to compile this with nuitka
+# and move this to /bin or if you just don't want logs
 LOGGING_LEVEL: int = logging.DEBUG
 LOGS_FILENAME: str = "pyhex_logs.log"
 LOGS_FORMAT: tuple = ("[%(asctime)s] %(levelname)s: %(message)s", "%H:%M.%S")
@@ -46,12 +50,16 @@ LOGS_FORMAT: tuple = ("[%(asctime)s] %(levelname)s: %(message)s", "%H:%M.%S")
 def main(sys_argv: list[str]) -> None:
     logger = logging.getLogger(__name__)
     logger.setLevel(LOGGING_LEVEL)
-    file_handler = logging.FileHandler(LOGS_FILENAME)
-    file_handler.setLevel(logging.DEBUG)
-    logger_formatter = logging.Formatter(*LOGS_FORMAT)
-    file_handler.setFormatter(logger_formatter)
+    if LOGS_ENABLED:
+        file_handler = logging.FileHandler(LOGS_FILENAME)
+        logger_formatter = logging.Formatter(*LOGS_FORMAT)
+        file_handler.setFormatter(logger_formatter)
+        logger.info("Start logging...")
+    else:
+        file_handler = logging.FileHandler("/dev/null")
+        logger.addHandler(file_handler)
+    file_handler.setLevel(LOGGING_LEVEL)
     logger.addHandler(file_handler)
-    logger.info("Start logging...")
 
     try:
         fname: str = sys_argv[FILENAME_POS]
@@ -180,10 +188,10 @@ def main(sys_argv: list[str]) -> None:
         stats_start += len(SYMS_STATS_SEP)
         for line, line_value in zip(range(17), [f"{i.ljust(10)}(8 bit):" for i in ("Binary", "Octal", "Hex", "Signed",
                                                                                    "Unsigned")] +
-                                               [f"{i.ljust(9)}(16 bit):" for i in ("Raw", "Signed", "Unsigned")] +
-                                               [f"{i.ljust(9)}(32 bit):" for i in ("Raw", "Signed", "Unsigned")] +
-                                               [f"{i.ljust(9)}(64 bit):" for i in ("Raw", "Signed", "Unsigned")] +
-                                               [f"Float    ({i} bit):" for i in (2 ** i for i in range(4, 7))]):
+                                    list(itertools.chain.from_iterable([f"{i.ljust(9)}({i_2} bit):" for i
+                                                                        in ("Raw", "Signed", "Unsigned")]
+                                                                       for i_2 in (2 ** i_3 for i_3 in range(4, 7)))) +
+                                    [f"Float    ({i} bit):" for i in (2 ** i for i in range(4, 7))]):
             stdscr.addstr(line + 1, stats_start, line_value)
         stats_start += 19
         line = 1
@@ -193,17 +201,13 @@ def main(sys_argv: list[str]) -> None:
             temp = func(curr_segment[0])[2:].rjust(leng, "0")
             stdscr.addstr(line, stats_start, temp.upper() if HEX_CAPS else temp)
             line += 1
-        for signed in (True, False):
-            stdscr.addstr(line, stats_start, str(int.from_bytes(curr_segment[:1], byteorder='big',
-                                                                signed=signed)).rjust(4))
-            line += 1
-        for i in (2 ** i for i in range(1, 4)):
+        for i, i_2 in zip((2 ** i for i in range(4)), tuple("bhiq")):
             temp = curr_segment[:i]
             stdscr.addstr(line, stats_start, temp.hex().upper() if HEX_CAPS else temp.hex())
             line += 1
             for signed in (True, False):
-                stdscr.addstr(line, stats_start, str(int.from_bytes(curr_segment[:1], byteorder='big',
-                                                                    signed=signed)).rjust(4))
+                stdscr.addstr(line, stats_start, str(struct.unpack(f">{i_2 if signed else i_2.upper()}",
+                                                                   temp)[0]).rjust(len(str(256**i))))
                 line += 1
         for i, float_symbol in zip((2 ** i for i in range(1, 4)), tuple("efd")):
             temp = curr_segment[:i]
@@ -404,33 +408,39 @@ def main(sys_argv: list[str]) -> None:
                     del changes[temp[0]]
                     del temp
             case _:
-                if chr(user_input) in string.hexdigits and not cursor[2]:
-                    user_input = chr(user_input)
-                    if absolute_cursor_pos in changes and cursor[3]:
-                        changes[absolute_cursor_pos] = ((int.from_bytes(changes[absolute_cursor_pos][0],
-                                                                        byteorder="big", signed=False) +
-                                                        int(user_input, 16)).to_bytes(1, byteorder="big"),
+                user_input = chr(user_input)
+                if user_input in string.hexdigits and not cursor[2]:
+                    if cursor[3]:
+                        changes[absolute_cursor_pos] = ((int(user_input, 16) +
+                                                         int.from_bytes(changes[absolute_cursor_pos][0],
+                                                                        byteorder="big")).to_bytes(1, byteorder="big",
+                                                                                                   signed=False),
                                                         changes[absolute_cursor_pos][1])
+                        cursor[3] = False
                     else:
-                        temp = 0
-                        for value in changes.values():
-                            temp = temp if temp == value[1] else value[1]
-                        changes[absolute_cursor_pos] = ((int(user_input, 16) * 16).to_bytes(1, byteorder="big"), temp)
+                        temp = sorted(i[1] for i in changes.values())
+                        temp = temp[-1] if len(temp) else 0
+                        changes[absolute_cursor_pos] = ((int(user_input, 16)*16).to_bytes(1, byteorder="big",
+                                                                                          signed=False),
+                                                        temp)
+                        cursor[3] = True
                         del temp
-                    cursor[3] = not cursor[3]
-                elif chr(user_input) in string.printable and cursor[2]:
-                    temp = 0
-                    for value in changes.values():
-                        temp = temp if temp == value[1] else value[1]
-                    changes[absolute_cursor_pos] = (chr(user_input).encode(curr_encoding), temp)
+                elif cursor[2]:
+                    temp = sorted(i[1] for i in changes.values())
+                    temp = temp[-1] if len(temp) else 0
+                    changes[absolute_cursor_pos] = (user_input.encode(encoding=curr_encoding,
+                                                                      errors="replace"),
+                                                    temp)
+                    cursor[3] = True
                     del temp
-                temp = changes.copy()
-                for address, value in changes.items():
-                    file.seek(address)
-                    if file.read(1) == value[0]:
-                        del temp[address]
-                changes = temp
-                del temp
+                if not cursor[3]:
+                    temp = changes.copy()
+                    for address, value in changes.items():
+                        file.seek(address, 0)
+                        if file.read(1) == value[0]:
+                            temp.pop(address)
+                    changes = temp.copy()
+                    del temp
     curses.endwin()
     file.close()
 
