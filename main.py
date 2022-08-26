@@ -38,7 +38,7 @@ MONOSPACED_65533: bool = False
 # if false, 65533 will be replaced with REPLACEMENT_CHAR
 REPLACEMENT_CHAR: str = "."
 # Read comment above
-LOGS_ENABLED: bool = True
+LOGS_ENABLED: bool = False
 # Set this to False if you want to compile this with nuitka
 # and move this to /bin or if you just don't want logs
 LOGGING_LEVEL: int = logging.DEBUG
@@ -105,6 +105,9 @@ def main(sys_argv: list[str]) -> None:
     file_offset: int = 0  # must be file_offset % 16 == 0
     # and yeah, this is also an up left corner
     curr_encoding: str = "ascii"
+    curr_endian: bool = True
+    # True  - big
+    # False - little
     changes: dict = {}
     user_input = 0
     while True:
@@ -114,6 +117,7 @@ def main(sys_argv: list[str]) -> None:
         stdscr.addstr(maxy - 1, 0, " " * (maxx - 1))
         stdscr.addstr(0, 2, perms_str)
         stdscr.addstr(0, 10, f"[{curr_encoding}]")
+        stdscr.addstr(0, 14 + len(curr_encoding), f"[{'big' if curr_endian else 'little'}]")
         stdscr.addstr(0, int((maxx-len(fname)) / 2), f"[{fname}]")
         stdscr.addstr(0, int(maxx-13), "[Modified]" if changes else "")
         stdscr.attroff(curses.color_pair(1))
@@ -197,12 +201,12 @@ def main(sys_argv: list[str]) -> None:
         line = 1
         file.seek(sum((file_offset, cursor[0] * 16, cursor[1])), 0)
         curr_segment = file.read(8).ljust(8, b"\x00")
-        for func, leng in zip((bin, oct, hex), (8, 3, 2)):
+        for func, leng in zip((bin, oct), (8, 3)):
             temp = func(curr_segment[0])[2:].rjust(leng, "0")
             stdscr.addstr(line, stats_start, temp.upper() if HEX_CAPS else temp)
             line += 1
         for i, i_2 in zip((2 ** i for i in range(4)), tuple("bhiq")):
-            temp = curr_segment[:i]
+            temp = curr_segment[:i][::-1 + int(curr_endian)*2]
             stdscr.addstr(line, stats_start, temp.hex().upper() if HEX_CAPS else temp.hex())
             line += 1
             for signed in (True, False):
@@ -210,7 +214,7 @@ def main(sys_argv: list[str]) -> None:
                                                                    temp)[0]).rjust(len(str(256**i))))
                 line += 1
         for i, float_symbol in zip((2 ** i for i in range(1, 4)), tuple("efd")):
-            temp = curr_segment[:i]
+            temp = curr_segment[:i][::-1 + int(curr_endian)*2]
             stdscr.addstr(line, stats_start, f"{struct.unpack(f'>{float_symbol}', temp)[0]}")
             line += 1
 
@@ -270,6 +274,8 @@ def main(sys_argv: list[str]) -> None:
                 elif cursor[2]:
                     cursor[2] = not cursor[2]
                     cursor[1] = 15
+            case 4:  # ord(Ctrl+D)
+                curr_endian ^= True
             case 5:  # ord(Ctrl+E)
                 import pkgutil
                 import encodings
