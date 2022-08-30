@@ -274,6 +274,12 @@ def main(sys_argv: list[str]) -> None:
                 elif cursor[2]:
                     cursor[2] = not cursor[2]
                     cursor[1] = 15
+            case curses.KEY_HOME:
+                file_offset, cursor[:2] = 0, [0, 0]
+            case curses.KEY_END:
+                temp = os.path.getsize(fname) - 1
+                file_offset, cursor[:2] = temp - (temp % 16), [0, temp % 16]
+                del temp
             case 4:  # ord(Ctrl+D)
                 curr_endian ^= True
             case 5:  # ord(Ctrl+E)
@@ -345,7 +351,11 @@ def main(sys_argv: list[str]) -> None:
                 while True:
                     logger.debug(f"Goto address: \"{temp}\"")
                     stdscr.addstr(int(maxy/2), int(maxx/2)-8, temp.upper() if HEX_CAPS else temp)
-                    stdscr.addstr(int(maxy/2), int(maxx/2)-8+len(temp), "_", curses.color_pair(1))
+                    stdscr.addstr(int(maxy/2), int(maxx/2)-7+len(temp), "_" * (15-len(temp)))
+                    stdscr.addstr(int(maxy / 2), int(maxx / 2)+8, " ")
+                    # .           ^-{ absolutely not a workaround }-^
+                    stdscr.addstr(int(maxy/2), int(maxx/2)-8+len(temp), "_" if len(temp) < 16 else " ",
+                                  curses.color_pair(1))
 
                     temp_input = stdscr.getch()
                     logger.debug(f"User pressed {temp_input}")
@@ -360,7 +370,7 @@ def main(sys_argv: list[str]) -> None:
                         case 263:  # ord(Backspace)
                             temp = temp[:-1]
                         case _:
-                            if chr(temp_input) in string.hexdigits:
+                            if chr(temp_input) in string.hexdigits and len(temp) < 16:
                                 temp += chr(temp_input)
                 if temp_input in (10, 27):
                     del temp
