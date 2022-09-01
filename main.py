@@ -1,11 +1,14 @@
 import curses
-import string
+import encodings
+import itertools
+import logging
 import os
+import pkgutil
+import re
+import string
 import struct
 import sys  # sus
 import typing
-import logging
-import itertools
 from os import access
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -38,7 +41,7 @@ MONOSPACED_65533: bool = False
 # if false, 65533 will be replaced with REPLACEMENT_CHAR
 REPLACEMENT_CHAR: str = "."
 # Read comment above
-LOGS_ENABLED: bool = False
+LOGS_ENABLED: bool = True
 # Set this to False if you want to compile this with nuitka
 # and move this to /bin or if you just don't want logs
 LOGGING_LEVEL: int = logging.DEBUG
@@ -79,6 +82,7 @@ def main(sys_argv: list[str]) -> None:
         raise PermissionError(f"\"{fname}\" is not accessible.")
     file: typing.BinaryIO = open(fname, mode=f"rb{'+' if perms[1] and perms[2] else ''}")
     logger.debug(f"Successfully opened \"{fname}\"")
+    del fname
     stdscr = curses.initscr()
     curses.start_color()
     # color_pair(1) - inverted colors
@@ -97,11 +101,11 @@ def main(sys_argv: list[str]) -> None:
     maxy, maxx = stdscr.getmaxyx()
     logger.debug(f"Screen size: {maxx}x{maxy} lines")
     perms_str: str = f"[{''.join(lttr if perm else '-' for lttr, perm in zip(list('FRWX'), perms))}]"
-    # [vertical, horizontal, section, second character (only in hex)]
+    # [vertical, horizontal, section, second character (only in hex), search]
     # section:
     # 0 - hex section
     # 1 - symbols section
-    cursor: list[int, ...] = [0, 0, False, False]
+    cursor: list = [0, 0, False, False, None]
     file_offset: int = 0  # must be file_offset % 16 == 0
     # and yeah, this is also an up left corner
     curr_encoding: str = "ascii"
@@ -118,7 +122,7 @@ def main(sys_argv: list[str]) -> None:
         stdscr.addstr(0, 2, perms_str)
         stdscr.addstr(0, 10, f"[{curr_encoding}]")
         stdscr.addstr(0, 14 + len(curr_encoding), f"[{'big' if curr_endian else 'little'}]")
-        stdscr.addstr(0, int((maxx-len(fname)) / 2), f"[{fname}]")
+        stdscr.addstr(0, int((maxx-len(file.name)) / 2), f"[{file.name}]")
         stdscr.addstr(0, int(maxx-13), "[Modified]" if changes else "")
         stdscr.attroff(curses.color_pair(1))
         absolute_cursor_pos = sum((file_offset, cursor[0] * 16, cursor[1]))
@@ -133,7 +137,7 @@ def main(sys_argv: list[str]) -> None:
         max_addr_len: int = MIN_ADDR_NUM
         hex_start: str = ''
         for offset in range(file_offset, file_offset+(16*(maxy-1)), 16):
-            rjusted_offset: str = (hex(offset))[2:].rjust(len(hex(os.path.getsize(fname))) - 2, '0')
+            rjusted_offset: str = (hex(offset))[2:].rjust(len(hex(os.path.getsize(file.name))) - 2, '0')
             max_addr_len: int = len(rjusted_offset) if len(rjusted_offset) > max_addr_len else max_addr_len
         for line, offset in zip(range(1, maxy - 1), range(file_offset, file_offset+(16*(maxy-1)), 16)):
             # help
@@ -218,6 +222,16 @@ def main(sys_argv: list[str]) -> None:
             stdscr.addstr(line, stats_start, f"{struct.unpack(f'>{float_symbol}', temp)[0]}")
             line += 1
 
+        find_start = syms_start + len(SYMS_STATS_SEP) + 16
+        stdscr.addstr(18, find_start-2, f"+{'-' * (maxx-find_start+1)}")
+        # .               ^-----{i think this is not a good idea}-----^
+        temp = (cursor[4][0].upper() if HEX_CAPS else cursor[4][0]) if cursor[4] else '_' * 16
+        stdscr.addstr(19, find_start, f"Find: {temp}")
+        stdscr.addstr(20, find_start, f"""Result: {(cursor[4][1]+1 if cursor[4][2] else '0') if cursor[4]
+                                                   else '0'}/{len(cursor[4][2]) if cursor[4]
+                                                              else '0'}""")
+        del temp
+
         hex_addr_symbol: str = hex(cursor[1])[2]
         stdscr.addstr(1+cursor[0], max_addr_len - 1,
                       hex_addr_symbol.upper() if HEX_CAPS else hex_addr_symbol)
@@ -277,16 +291,13 @@ def main(sys_argv: list[str]) -> None:
             case curses.KEY_HOME:
                 file_offset, cursor[:2] = 0, [0, 0]
             case curses.KEY_END:
-                temp = os.path.getsize(fname) - 1
+                temp = os.path.getsize(file.name) - 1
                 file_offset, cursor[:2] = temp - (temp % 16), [0, temp % 16]
                 del temp
             case 4:  # ord(Ctrl+D)
                 curr_endian ^= True
             case 5:  # ord(Ctrl+E)
-                import pkgutil
-                import encodings
                 encodes = set(name for imp, name, ispkg in pkgutil.iter_modules(encodings.__path__) if not ispkg)
-                del pkgutil, encodings
                 logger.debug(f"All encodings: {encodes}")
                 encodes.difference_update({"aliases"})
                 logger.debug(f"Encodings without aliases: {encodes}")
@@ -337,6 +348,68 @@ def main(sys_argv: list[str]) -> None:
                             break
                 logger.debug(f"Changed {temp} encoding to {curr_encoding}")
                 del encodes, encode_cursor, temp
+            case 6:  # ord(Ctrl+F)
+                temp = ["", False]
+                # False - hex
+                # True  - symbols
+                """
+                +----------------------------------+
+                | Find this in hex section:        |
+                | ________________________________ |
+                +----------------------------------+
+                """
+                for line, line_value in zip(range(-2, 2), (f"+{'-' * 34}+", "| Find this in hex section:        |",
+                                                           f"| {'_' * 32} |", f"+{'-' * 34}+")):
+                    stdscr.addstr(int(maxy / 2) + line, int(maxx / 2) - 18, line_value)
+                while True:
+                    stdscr.addstr(int(maxy / 2), int(maxx / 2) - 16, temp[0].upper() if HEX_CAPS else temp[0])
+                    stdscr.addstr(int(maxy / 2) + 1, int(maxx / 2)-16, "{[Text]}" if temp[1] else "{[Hex]}-")
+                    stdscr.addstr(int(maxy / 2), int(maxx / 2) - 16 + len(temp[0]), "_" * (32 - len(temp[0])))
+                    stdscr.addstr(int(maxy / 2), int(maxx / 2) + 16, " ")
+                    # .           ^--{ absolutely not a workaround }--^
+                    stdscr.addstr(int(maxy / 2), int(maxx / 2) - 16 + len(temp[0]), "_" if len(temp[0]) < 32 else " ",
+                                  curses.color_pair(1))
+
+                    temp_input = stdscr.getch()
+                    stdscr.addstr(int(maxy / 2) - 1, int(maxx / 2) - 16, "Find this in hex section:      ")
+                    stdscr.addstr(int(maxy / 2) + 1, int(maxx / 2) + 1, '-' * 15)
+                    logger.debug(f"{temp=}")
+                    match temp_input:
+                        case curses.KEY_UP:
+                            temp = [temp[0] if not temp[1] else "", False]
+                        case curses.KEY_DOWN:
+                            temp = [temp[0] if temp[1] else "", True]
+                        case 10:  # ord(Enter)
+                            if len(temp[0]) % 2 and not temp[1]:
+                                """
+                                +----------------------------------+
+                                | Given hex num's len is not even  |
+                                | ________________________________ |
+                                +------------------(Press any key)-+
+                                """
+                                for line, col, line_value in zip((-1, 1), (16, -1), ("Given hex num's len is not even",
+                                                                                     "(Press any key)")):
+                                    stdscr.addstr(int(maxy / 2) + line, int(maxx / 2) - col, line_value)
+                            elif len(temp[0]):
+                                if temp[1]:
+                                    temp[0] = temp[0].encode(curr_encoding).hex()
+                                cursor[4] = [temp[0], 0, []]
+                                temp = re.compile(temp[0].replace("?", "[0-9a-f]?"))
+                                for i in range(os.path.getsize(file.name)):
+                                    file.seek(i, 0)
+                                    if re.match(temp, file.read(int(len(cursor[4][0])/2)).hex()):
+                                        cursor[4][2] += [i]
+                                del temp
+                                break
+                        case 27:  # ord(Esc)
+                            break
+                        case 263:  # ord(Backspace)
+                            temp[0] = temp[0][:-1]
+                        case _:
+                            if chr(temp_input) in f"{string.hexdigits}?" and not temp[1]:
+                                temp[0] += chr(temp_input) if len(temp[0]) < 32 else ""
+                            elif chr(temp_input) in string.printable.replace(string.whitespace, "") + " " and temp[1]:
+                                temp[0] += chr(temp_input) if len(temp[0]) < 32 else ""
             case 7:  # ord(Ctrl+G)
                 temp = ""
                 """
@@ -421,7 +494,22 @@ def main(sys_argv: list[str]) -> None:
                 for address, value in changes.items():
                     temp = temp if temp[1] > value[1] else (address, value[1])
                 if temp[1] != -1:
-                    del changes[temp[0]]
+                    del changes[temp[0]], temp
+            case 27:  # ord(Esc)
+                cursor[4] = None
+            case 44:  # ord(Ctrl+<)
+                cursor[4][1] -= int(cursor[4][1] > 0)
+                if len(cursor[4][2]):
+                    temp = cursor[4][2][cursor[4][1]]
+                    file_offset = temp - temp % 16
+                    cursor[:2] = [0, temp % 16]
+                    del temp
+            case 46:  # ord(Ctrl+>)
+                cursor[4][1] += int(cursor[4][1] < len(cursor[4][2])-1)
+                if len(cursor[4][2]):
+                    temp = cursor[4][2][cursor[4][1]]
+                    file_offset = temp - temp % 16
+                    cursor[:2] = [0, temp % 16]
                     del temp
             case _:
                 user_input = chr(user_input)
