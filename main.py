@@ -41,7 +41,7 @@ MONOSPACED_65533: bool = False
 # if false, 65533 will be replaced with REPLACEMENT_CHAR
 REPLACEMENT_CHAR: str = "."
 # Read comment above
-LOGS_ENABLED: bool = True
+LOGS_ENABLED: bool = False
 # Set this to False if you want to compile this with nuitka
 # and move this to /bin or if you just don't want logs
 LOGGING_LEVEL: int = logging.DEBUG
@@ -362,7 +362,8 @@ def main(sys_argv: list[str]) -> None:
                                                            f"| {'_' * 32} |", f"+{'-' * 34}+")):
                     stdscr.addstr(int(maxy / 2) + line, int(maxx / 2) - 18, line_value)
                 while True:
-                    stdscr.addstr(int(maxy / 2), int(maxx / 2) - 16, temp[0].upper() if HEX_CAPS else temp[0])
+                    stdscr.addstr(int(maxy / 2), int(maxx / 2) - 16, temp[0].upper() if HEX_CAPS and not temp[1]
+                                  else temp[0])
                     stdscr.addstr(int(maxy / 2) + 1, int(maxx / 2)-16, "{[Text]}" if temp[1] else "{[Hex]}-")
                     stdscr.addstr(int(maxy / 2), int(maxx / 2) - 16 + len(temp[0]), "_" * (32 - len(temp[0])))
                     stdscr.addstr(int(maxy / 2), int(maxx / 2) + 16, " ")
