@@ -11,6 +11,20 @@ import sys  # sus
 import typing
 from os import access
 
+"""
+Hotkeys:
+    Ctrl+D - Change endian (from big to little and vice-versa)
+    Ctrl+E - Change encoding
+    Ctrl+X - Exit
+    Ctrl+S - Save
+    Ctrl+Z - Undo last change
+    Ctrl+F - Find hex or string
+    Ctrl+G - Goto
+    Ctrl+> - Go to next search result     (aka Ctrl+Shift+.)
+    Ctrl+< - Go to previous search result (aka Ctrl+Shift+,)
+    Esc    - Clear search query
+"""
+
 # ----------------------------------------------------------------------------------------------------------------------
 FILENAME_POS: int = 1
 # position of filename in argv (0~inf)
